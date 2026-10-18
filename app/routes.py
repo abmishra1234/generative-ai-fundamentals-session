@@ -133,7 +133,11 @@ def preview_prompt(req: PromptPreviewRequest) -> PromptPreviewResponse:
     Return the exact prompt build_ad_prompt() would send, plus size and text_mode.
     No model call - this is free, use it to debug your prompt.
     """
-    raise NotImplementedError("TODO 7: implement POST /api/prompt/preview in app/routes.py")
+    return PromptPreviewResponse(
+        prompt=build_ad_prompt(clean_quote(req.quote), req.settings),
+        size=req.settings.size,
+        text_mode=req.settings.text_mode,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -142,7 +146,7 @@ def preview_prompt(req: PromptPreviewRequest) -> PromptPreviewResponse:
 @router.post("/quote/refine", response_model=QuoteRefineResponse)
 def refine(req: QuoteRefineRequest) -> QuoteRefineResponse:
     """Call quote_service.refine_quote() and wrap the result in QuoteRefineResponse."""
-    raise NotImplementedError("TODO 8: implement POST /api/quote/refine in app/routes.py")
+    return QuoteRefineResponse(original=req.quote, suggestions=refine_quote(req))
 
 
 # --------------------------------------------------------------------------- #

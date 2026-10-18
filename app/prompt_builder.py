@@ -91,11 +91,11 @@ def clean_quote(quote: str | None) -> str:
     # replace all newline tabs , double space with single space
     text = " ".join(quote.split())
 
-    for ch in ('"', """, """):
-        text.replace(ch, "'")
+    for ch in ('"', "\u201c", "\u201d"):
+        text = text.replace(ch, "'")
 
     if len(text) > MAX_QUOTE_CHARS:
-        text = text[: MAX_QUOTE_CHARS - 1].rstrip() + "..."
+        text = text[: MAX_QUOTE_CHARS - 1].rstrip() + "\u2026"
 
     return text
 

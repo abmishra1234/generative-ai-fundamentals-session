@@ -78,7 +78,7 @@ def normalize_upload(data: bytes, content_type: str | None, label: str) -> bytes
 
     if len(data) > config.max_upload_bytes:
         mb = config.max_upload_bytes / (1024 * 1024)
-        raise AdComposeError(413, f"{label} is too big ({len(data)/1024/1024:.1f} MB)", f"must be < {mb} MB", "Resize or compress it and retry")
+        raise AdComposeError(413, f"{label} is too big ({len(data)/1024/1024:.1f} MB)", f"Must be <= {mb:g} MB. Resize or compress it and retry")
 
     if content_type not in ALLOWED_TYPES:
         raise AdComposeError(415, f"{label} has unsupported type {content_type}", "use JPG, PNG, or WebP")

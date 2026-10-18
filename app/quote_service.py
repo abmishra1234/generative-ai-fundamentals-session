@@ -77,4 +77,36 @@ def refine_quote(req: QuoteRefineRequest) -> list[str]:
     * No suggestions parsed -> AdComposeError(502, "...")
     * APITimeoutError -> 504, APIConnectionError -> 502, APIStatusError -> 502
     """
-    raise NotImplementedError("TODO 5: implement refine_quote() in app/quote_service.py")
+    if config.dry_run:
+        items = [req.quote, req.quote + "!"]
+        if req.brand_name:
+            items.append(f"{req.brand_name}: {req.quote}")
+        suggestions = parse_suggestions(json.dumps({"suggestions": items}))
+    else:
+        content = f"Quote: {req.quote}\nMood: {req.mood}"
+        if req.brand_name:
+            content += f"\nBrand: {req.brand_name}"
+        try:
+            client = get_client()
+            reply = client.chat.completions.create(
+                model=llm_settings.chat_model,
+                messages=[
+                    {"role": "developer", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": content},
+                ],
+                timeout=llm_settings.timeout,
+            )
+        except APITimeoutError as err:
+            raise AdComposeError(504, "Quote refinement timed out", "Try again later") from err
+        except APIConnectionError as err:
+            raise AdComposeError(
+                502, "Could not connect to the chat model", "Check your VPN / CA_BUNDLE configuration"
+            ) from err
+        except APIStatusError as err:
+            raise AdComposeError(502, str(err)) from err
+        raw = reply.choices[0].message.content if reply.choices else ""
+        suggestions = parse_suggestions(raw or "")
+
+    if not suggestions:
+        raise AdComposeError(502, "The chat model returned no usable quote suggestions")
+    return suggestions
