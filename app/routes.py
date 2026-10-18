@@ -175,4 +175,42 @@ def compose_ad(
          elapsed_seconds rounded to 1 decimal.
       9. save_metadata(resp); log one INFO line; return resp
     """
-    raise NotImplementedError("TODO 6: implement POST /api/ads/compose in app/routes.py")
+    s = parse_settings(settings)
+    q = clean_quote(quote)
+    if s.text_mode != "none" and not q:
+        raise AdComposeError(400, "Please enter a marketing quote before composing an ad.")
+
+    model_png = normalize_upload(
+        model_image.file.read(), model_image.content_type, "model image"
+    )
+    product_png = normalize_upload(
+        product_image.file.read(), product_image.content_type, "product image"
+    )
+    prompt = build_ad_prompt(q, s)
+    t0 = time.perf_counter()
+    if config.dry_run:
+        images = compose_dry_run(model_png, product_png, s)
+    else:
+        images = compose_with_llm(model_png, product_png, prompt, s)
+
+    if s.text_mode == "overlay" or (config.dry_run and s.text_mode == "ai"):
+        images = [overlay_quote(image, q, s) for image in images]
+
+    ad_id = new_ad_id()
+    names = save_images(ad_id, images)
+    resp = AdResponse(
+        id=ad_id,
+        images=[AdImage(url=f"/api/ads/files/{name}", filename=name) for name in names],
+        prompt=prompt,
+        quote=q,
+        settings=s,
+        mode="dry-run" if config.dry_run else "llm",
+        model="pillow-collage" if config.dry_run else llm_settings.image_model,
+        elapsed_seconds=round(time.perf_counter() - t0, 1),
+    )
+    save_metadata(resp)
+    log.info(
+        "Composed ad %s | mode=%s | model=%s | images=%d | elapsed=%.1fs",
+        resp.id, resp.mode, resp.model, len(resp.images), resp.elapsed_seconds,
+    )
+    return resp
