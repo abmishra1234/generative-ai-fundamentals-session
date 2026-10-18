@@ -63,7 +63,18 @@ def wrap_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> lis
     A single word wider than max_width goes on its own line (do not split words).
     Empty text -> [].
     """
-    raise NotImplementedError("TODO 4a: implement wrap_text() in app/text_overlay.py")
+    lines: list[str] = []
+    current = ""
+    for word in text.split():
+        candidate = f"{current} {word}" if current else word
+        if current and text_width(draw, candidate, font) > max_width:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -89,4 +100,69 @@ def overlay_quote(png: bytes, quote: str, s: AdSettings) -> bytes:
       7. Image.alpha_composite(img, layer) -> convert("RGB") -> save PNG -> bytes.
     Blank quote -> return the input unchanged.
     """
-    raise NotImplementedError("TODO 4b: implement overlay_quote() in app/text_overlay.py")
+    if not quote.strip():
+        return png
+
+    with Image.open(io.BytesIO(png)) as source:
+        img = source.convert("RGBA")
+    width, height = img.size
+    layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    band_height = max(1, int(height * 0.24))
+    band_top = {
+        "top": 0,
+        "center": (height - band_height) // 2,
+        "bottom": height - band_height,
+    }[s.quote_position]
+    max_width = max(1, int(width * 0.88))
+    font_size = max(18, int(height * 0.07))
+    brand = s.brand_name.upper() if s.brand_name else ""
+
+    while True:
+        font = load_font(s.font_style, font_size)
+        lines = wrap_text(draw, quote, font, max_width)
+        line_height = max(1, int(font_size * 1.2))
+        brand_size = max(1, int(font_size * 0.4))
+        brand_font = load_font(s.font_style, brand_size)
+        brand_lines = wrap_text(draw, brand, brand_font, max_width)
+        brand_line_height = max(1, int(brand_size * 1.2))
+        gap = max(2, font_size // 5) if brand_lines else 0
+        block_height = len(lines) * line_height + gap + len(brand_lines) * brand_line_height
+        fits_width = all(text_width(draw, line, font) <= max_width for line in lines)
+        fits_width = fits_width and all(
+            text_width(draw, line, brand_font) <= max_width for line in brand_lines
+        )
+        if font_size <= 18 or (fits_width and block_height <= band_height * 0.75):
+            break
+        font_size = max(18, font_size - 2)
+
+    margin_x = max(1, int(width * 0.03))
+    margin_y = max(1, int(band_height * 0.04))
+    draw.rounded_rectangle(
+        (margin_x, band_top + margin_y,
+         width - margin_x - 1, band_top + band_height - margin_y - 1),
+        radius=max(1, int(height * 0.02)),
+        fill=(*hex_to_rgb(s.accent_color), 200),
+    )
+    color = (*hex_to_rgb(s.text_color), 255)
+
+    def draw_centered(line: str, line_font, top: float) -> None:
+        left, upper, right, _ = draw.textbbox((0, 0), line, font=line_font)
+        x = (width - (right - left)) / 2 - left
+        y = top - upper
+        draw.text((x + 2, y + 2), line, font=line_font, fill=(0, 0, 0, 180))
+        draw.text((x, y), line, font=line_font, fill=color)
+
+    y = band_top + (band_height - block_height) / 2
+    for line in lines:
+        draw_centered(line, font, y)
+        y += line_height
+    y += gap
+    for line in brand_lines:
+        draw_centered(line, brand_font, y)
+        y += brand_line_height
+
+    result = Image.alpha_composite(img, layer).convert("RGB")
+    output = io.BytesIO()
+    result.save(output, format="PNG")
+    return output.getvalue()

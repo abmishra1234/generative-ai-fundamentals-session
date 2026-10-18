@@ -137,7 +137,49 @@ def compose_with_llm(model_png: bytes, product_png: bytes, prompt: str, s: AdSet
        APIConnectionError                       -> 502  hint: VPN / CA_BUNDLE
        any other APIStatusError                 -> 502
     """
-    raise NotImplementedError("TODO 3: implement compose_with_llm() in app/image_service.py")
+
+    client = get_client().with_options(timeout=config.image_timeout, max_retries=0)
+    kwargs: dict = {
+        "model": llm_settings.image_model,
+        "image": [
+            ("model.png", model_png, "image/png"),
+            ("product.png", product_png, "image/png")
+        ],
+        "prompt": prompt,
+        "size": s.size,
+        "quality": s.quality,
+        "n": s.variations
+    }
+    if config.input_fidelity:
+        kwargs["input_fidelity"] = config.input_fidelity
+
+    try:
+        result = client.images.edit(**kwargs)
+    except APITimeoutError as err:
+        raise AdComposeError(
+            504, "Image generation timed out", "Raise IMAGE_TIMEOUT_SECONDS and retry"
+        ) from err
+    except BadRequestError as err:
+        raise AdComposeError(400, _err_text(err)) from err
+    except (AuthenticationError, PermissionDeniedError) as err:
+        raise AdComposeError(
+            502, _err_text(err), "Run python 00_check_setup.py"
+        ) from err
+    except RateLimitError as err:
+        raise AdComposeError(429, _err_text(err), "Wait and retry") from err
+    except APIConnectionError as err:
+        raise AdComposeError(
+            502, str(err), "Check your VPN / CA_BUNDLE configuration"
+        ) from err
+    except APIStatusError as err:
+        raise AdComposeError(502, _err_text(err)) from err
+
+    images: list[bytes] = []
+    for item in result.data:
+        if not item.b64_json:
+            raise AdComposeError(502, "Image model returned an image without base64 data")
+        images.append(base64.b64decode(item.b64_json))
+    return images
 
 
 def _err_text(err: APIStatusError) -> str:

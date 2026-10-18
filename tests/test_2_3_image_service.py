@@ -3,7 +3,15 @@ import io
 
 import httpx
 import pytest
-from openai import APITimeoutError, AuthenticationError, BadRequestError
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AuthenticationError,
+    BadRequestError,
+    PermissionDeniedError,
+    RateLimitError,
+)
 from PIL import Image
 
 from app.image_service import AdComposeError, compose_with_llm, normalize_upload
@@ -113,3 +121,22 @@ def test_compose_missing_b64_maps_to_502(fake_client, app_config):
     with pytest.raises(AdComposeError) as e:
         compose_with_llm(b"M", b"P", "p", AdSettings())
     assert e.value.status_code == 502
+
+
+@pytest.mark.parametrize(
+    "error, status, hint",
+    [
+        (PermissionDeniedError("denied", response=httpx.Response(403, request=REQ), body=None), 502, "00_check_setup"),
+        (RateLimitError("limited", response=httpx.Response(429, request=REQ), body=None), 429, "retry"),
+        (APIConnectionError(request=REQ), 502, "CA_BUNDLE"),
+        (APIStatusError("unavailable", response=httpx.Response(503, request=REQ), body=None), 502, None),
+    ],
+)
+def test_compose_remaining_sdk_errors(fake_client, app_config, error, status, hint):
+    fake_client.images.raise_exc = error
+    with pytest.raises(AdComposeError) as exc:
+        compose_with_llm(b"M", b"P", "p", AdSettings())
+    assert exc.value.status_code == status
+    if hint:
+        assert hint in exc.value.hint
+    assert exc.value.__cause__ is error
