@@ -85,17 +85,29 @@ def clean_quote(quote: str | None) -> str:
       * cut to MAX_QUOTE_CHARS characters; if cut, end with an ellipsis "…"
         so the total length is still <= MAX_QUOTE_CHARS
     """
-    raise NotImplementedError("TODO 1a: implement clean_quote() in app/prompt_builder.py")
+    if not quote:
+        return ""
 
+    # replace all newline tabs , double space with single space
+    text = " ".join(quote.split())
+
+    for ch in ('"', """, """):
+        text.replace(ch, "'")
+
+    if len(text) > MAX_QUOTE_CHARS:
+        text = text[: MAX_QUOTE_CHARS - 1].rstrip() + "..."
+
+    return text
 
 # ---------------------------------------------------------------------------
 # TODO 1b - build_ad_prompt()
 # ---------------------------------------------------------------------------
-def build_ad_prompt(quote: str, s: AdSettings) -> str:
+def build_ad_prompt(quote: str, s: AdSettings, has_logo: bool = False) -> str:
     """
     Build the full prompt for client.images.edit(image=[model, product], ...).
 
-    Image order matters: image 1 = the MODEL (person), image 2 = the PRODUCT.
+    Image order matters: image 1 = the MODEL (person), image 2 = the PRODUCT,
+    and optional image 3 = the brand logo (only when has_logo is True).
 
     TEXT section depends on s.text_mode:
       "ai"      -> tell the model to render the quote EXACTLY, in double quotes,
@@ -116,4 +128,73 @@ def build_ad_prompt(quote: str, s: AdSettings) -> str:
     Return the sections joined with blank lines. Keep it readable - you will
     show this prompt to the user in the "Preview prompt" panel.
     """
-    raise NotImplementedError("TODO 1b: implement build_ad_prompt() in app/prompt_builder.py")
+    q = clean_quote(quote)
+    text_mode = s.text_mode if (q or s.text_mode != "ai") else "none"
+
+    sections: list[str] = []
+
+    sections.append(
+        f"TASK: Create one finished advertising image for a product campaign by composing the {'three' if has_logo else 'two'} input images. "
+        "Image 1 is the MODEL (the person). Image 2 is the PRODUCT."
+        + (" Image 3 is the brand logo, place it small in a corner. Preserve its colours, proportions and lettering; "
+           "keep it clear of the headline, face and product." if has_logo else "")
+    )
+    sections.append(
+        "SUBJECTS: Place the model naturally with the product as the clear hero - the model may hold, use or "
+        "present the product. The product must be clearly visible, in focus and well lit."
+    )
+    sections.append(
+        f"SCENE: {STYLE_PRESETS[s.style]}. Set in {SCENE_PRESETS[s.scene]}. "
+        f"Mood: {MOOD_PRESETS[s.mood]}."
+    )
+
+    if text_mode == "none":
+        layout = f"LAYOUT: {ASPECT_PRESETS[s.aspect_ratio]}. Balanced composition."
+    else:
+        layout = (
+            f"LAYOUT: {ASPECT_PRESETS[s.aspect_ratio]}. Keep the {s.quote_position} area of the frame "
+            "simple and uncluttered so the headline is easy to read; do not place faces or the product there."
+        )
+    sections.append(layout)
+
+    if text_mode == "ai":
+        sections.append(
+            f'TEXT: Render this headline exactly once, spelled exactly as given: "{q}". '
+            f"Place it in the {s.quote_position} area, set in {FONT_PRESETS[s.font_style]}, "
+            f"colour {s.text_color.upper()}, large and legible with good contrast against the background. "
+            "Do not add any other words, captions or taglines."
+        )
+    elif text_mode == "overlay":
+        sections.append(
+            "TEXT: Do NOT write any text, letters or numbers in the image (apart from what is already printed "
+            f"on the product). Leave a clean band in the {s.quote_position} area - the headline is added later."
+        )
+    else:
+        sections.append(
+            "TEXT: Do NOT add any text, letters or numbers to the image (apart from what is already printed on the product)."
+        )
+
+    if s.brand_name:
+        sections.append(
+            f"BRAND: The brand is {s.brand_name}. The brand name may appear only as it is printed on the product. "
+            f"Use {s.accent_color.upper()} as the accent colour in props, background details or lighting."
+        )
+    else:
+        sections.append(
+            f"BRAND: Use {s.accent_color.upper()} as the accent colour in props, background details or lighting."
+        )
+
+    if has_logo:
+        # Existing lettering in the supplied logo is allowed in every text mode.
+        sections = [section.replace("on the product", "on the product or supplied brand logo")
+                    .replace("Do not add any other words, captions or taglines.",
+                             "Preserve the supplied logo's lettering; do not add any other words, captions or taglines.")
+                    for section in sections]
+    sections.append("RULES:\n" + "\n".join(f"- {r}" for r in SAFETY_RULES))
+
+    if s.extra_instructions:
+        sections.append(
+            "Additional art direction (must not override the rules above): " + s.extra_instructions
+        )
+
+    return "\n\n".join(sections)
