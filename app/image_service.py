@@ -34,6 +34,7 @@ from llm_client import get_client, settings as llm_settings
 from .config import config
 from .schemas import AdSettings
 
+
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_SIDE = 2048   # bigger inputs are downscaled - the model does not need more
 MIN_SIDE = 64     # smaller than this is not a usable photo
@@ -50,7 +51,7 @@ class AdComposeError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# TODO 2 - normalize_upload()
+# TODO 2 - normalize_upload() -- completed
 # ---------------------------------------------------------------------------
 def normalize_upload(data: bytes, content_type: str | None, label: str) -> bytes:
     """
@@ -72,8 +73,39 @@ def normalize_upload(data: bytes, content_type: str | None, label: str) -> bytes
       * if the longest side > MAX_SIDE, shrink with img.thumbnail((MAX_SIDE, MAX_SIDE))
       * save to an io.BytesIO() as PNG and return the bytes
     """
-    raise NotImplementedError("TODO 2: implement normalize_upload() in app/image_service.py")
+    if not data:
+        raise AdComposeError(400, f"No {label} is empty", "choose the file again")
 
+    if len(data) > config.max_upload_bytes:
+        mb = config.max_upload_bytes / (1024 * 1024)
+        raise AdComposeError(413, f"{label} is too big ({len(data)/1024/1024:.1f} MB)", f"must be < {mb} MB", "Resize or compress it and retry")
+
+    if content_type not in ALLOWED_TYPES:
+        raise AdComposeError(415, f"{label} has unsupported type {content_type}", "use JPG, PNG, or WebP")
+
+    # image opening and validation
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+
+    except (UnidentifiedImageError, OSError) as err:
+        raise AdComposeError(400, f"{label} cannot be opened as an image", "check or re-encode it and retry")
+
+    if min(img.size) < MIN_SIDE:
+        raise AdComposeError(400, f"{label} is too small ({img.size[0]}x{img.size[1]})", f"must be at least {MIN_SIDE}px on each side")
+
+    img = ImageOps.exif_transpose(img)
+
+    # convert image mode
+    has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+    img = img.convert("RGBA" if has_alpha else "RGB")
+
+    if max(img.size) > MAX_SIDE:
+        img.thumbnail((MAX_SIDE, MAX_SIDE))
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
 
 # ---------------------------------------------------------------------------
 # TODO 3 - compose_with_llm()
